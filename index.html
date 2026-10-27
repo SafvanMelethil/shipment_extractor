@@ -303,7 +303,7 @@ async function askOnce(sample, blobs, extra){
   return out;
 }
 
-function rows(s){ return s.pharmacies.flatMap(p => p.deliveries.map(d => [p.code, d.id])); }
+function rows(s){ return s.pharmacies.flatMap(p => p.deliveries.map(d => [p.code, '0' + d.id])); }
 function fileName(s){ return (s.shipmentId || 'shipment') + '.xlsx'; }
 
 function render(){
