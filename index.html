@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Shipment Sorter</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one narrow column — drop zone, then the downloaded result. */
+:root{
+  --bg:#f3f5f9; --surface:#ffffff; --sunk:#e9edf4; --line:#d6dce7;
+  --fg:#18213a; --muted:#5b6680; --ink:#2b46a3; --ink-soft:#e4e9f8;
+  --ok:#1d7a4e; --ok-soft:#e1f2e9; --bad:#b3261e;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1422; --surface:#171e30; --sunk:#1e2740; --line:#2c3652;
+  --fg:#e6eaf4; --muted:#97a2bd; --ink:#8fa8ff; --ink-soft:#24305a;
+  --ok:#5fd19a; --ok-soft:#173a2a; --bad:#ff8a80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1422; --surface:#171e30; --sunk:#1e2740; --line:#2c3652;
+  --fg:#e6eaf4; --muted:#97a2bd; --ink:#8fa8ff; --ink-soft:#24305a;
+  --ok:#5fd19a; --ok-soft:#173a2a; --bad:#ff8a80; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5}
+.wrap{max-width:640px;margin:0 auto;padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+header{display:flex;align-items:center;gap:12px}
+.mark{width:36px;height:36px;border-radius:8px;background:var(--ink);display:grid;place-items:center;flex:none}
+.mark svg{width:20px;height:20px}
+h1{font-size:20px;margin:0;font-weight:700}
+.sub{color:var(--muted);font-size:13px;margin:0}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:40px 16px;text-align:center;cursor:pointer;background:var(--surface);transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--ink);background:var(--ink-soft)}
+.drop:focus-visible,.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.drop b{display:block;font-size:17px;margin-bottom:4px}
+.drop span{color:var(--muted);font-size:13px}
+.drop.busy{pointer-events:none;opacity:.7}
+.status{font-size:14px;color:var(--muted);text-align:center;min-height:1.5em}
+.status.err{color:var(--bad)}
+.spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:-2px;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.res-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px}
+.sid{font-family:var(--mono);font-size:26px;font-weight:600;line-height:1.1}
+.meta{color:var(--muted);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ink);background:var(--ink);color:var(--surface);font:inherit;font-size:14px;font-weight:600;padding:9px 16px;border-radius:6px;cursor:pointer}
+.btn:hover{filter:brightness(1.08)}
+.btn svg{width:16px;height:16px}
+.tablewrap{overflow-x:auto;margin-top:14px;max-height:60vh;overflow-y:auto;border-top:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--surface)}
+td{font-family:var(--mono)}
+tr.first td{border-top:2px solid var(--sunk)}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></div>
+    <div><h1>Shipment Sorter</h1><p class="sub">Drop a shipment report, get the Excel</p></div>
+  </header>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose shipment report">
+    <b>Drop the shipment report here</b>
+    <span>PDF from the system — the Excel downloads automatically</span>
+  </div>
+  <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+  <div class="status" id="status" role="status"></div>
+  <section class="card" id="result" hidden></section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// Shared parser: turns positioned PDF text items into shipment data.
+function itemsToLines(items) {
+  const toks = [];
+  for (const it of items) {
+    if (!it.str || !it.str.trim()) continue;
+    const x0 = it.transform[4], y = it.transform[5];
+    const parts = it.str.split(/\s+/).filter(Boolean);
+    const w = (it.width || 0) / Math.max(it.str.length, 1);
+    let off = 0;
+    for (const p of parts) {
+      const idx = it.str.indexOf(p, off);
+      toks.push({ s: p, x: x0 + idx * w, y });
+      off = idx + p.length;
+    }
+  }
+  toks.sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines = [];
+  for (const t of toks) {
+    const L = lines.find(l => Math.abs(l.y - t.y) <= 3);
+    if (L) L.t.push(t); else lines.push({ y: t.y, t: [t] });
+  }
+  lines.sort((a, b) => b.y - a.y);
+  return lines.map(l => l.t.sort((a, b) => a.x - b.x).map(t => t.s));
+}
+
+function parseShipment(lines) {
+  const out = { shipmentId: '', date: '', driver: '', pharmacies: [], footer: {} };
+  let cur = null;
+  const ID = /^\d{7,}$/, WH = /^[A-Z]{1,3}\d{1,3}$/i, NUM = /^\d+$/;
+  for (const tokens of lines) {
+    const text = tokens.join(' ');
+    let m;
+    if ((m = text.match(/Shipment\s*ID\s*:\s*(\d+)/i))) out.shipmentId = m[1];
+    if ((m = text.match(/Date\s*:\s*([\d.\/-]+(?:\s+\d{1,2}:\d{2})?)/i))) out.date = m[1];
+    if ((m = text.match(/Driver\s*Name\s*:\s*(.+?)(?:\s{2,}|$)/i))) out.driver = m[1].trim();
+    let isFooter = false;
+    if ((m = text.match(/Total\s*PH\s*:\s*(\d+)/i))) { out.footer.ph = +m[1]; isFooter = true; }
+    if ((m = text.match(/Total\s*Deliveries\s*:\s*(\d+)/i))) { out.footer.deliveries = +m[1]; isFooter = true; }
+    if ((m = text.match(/Total\s*Boxes\s*:\s*(\d+)/i))) { out.footer.boxes = +m[1]; isFooter = true; }
+    if (isFooter) continue;
+    if (/^total$/i.test(tokens[0])) {
+      const nums = tokens.slice(1).filter(t => NUM.test(t)).map(Number);
+      if (cur && nums.length) { cur.declaredCount = nums[0]; if (nums.length > 1) cur.declaredBoxes = nums[1]; }
+      continue;
+    }
+    const i = tokens.findIndex(t => ID.test(t));
+    if (i < 0) continue;
+    const id = tokens[i];
+    const boxes = NUM.test(tokens[i + 1] || '') ? Number(tokens[i + 1]) : null;
+    const whIdx = i > 0 && WH.test(tokens[i - 1]) ? i - 1 : i;
+    const warehouse = whIdx < i ? tokens[whIdx] : '';
+    if (whIdx > 0) {
+      const before = tokens.slice(0, whIdx);
+      cur = { code: before[0], area: '', route: '', deliveries: [] };
+      const rest = before.slice(1);
+      const ri = rest.findIndex(t => /^[A-Z]{2,3}-[A-Z]{2,4}$/.test(t));
+      if (ri >= 0) { cur.route = rest[ri]; cur.area = rest.slice(0, ri).join(' '); }
+      else cur.area = rest.join(' ');
+      out.pharmacies.push(cur);
+    }
+    if (!cur) { cur = { code: '?', area: '', route: '', deliveries: [] }; out.pharmacies.push(cur); }
+    cur.deliveries.push({ id, warehouse, boxes });
+  }
+  return out;
+}
+
+
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function setStatus(html, err){ const s=$('#status'); s.innerHTML=html; s.classList.toggle('err',!!err); }
+const samplePromise = window.claude?.use ? window.claude.use('sample').catch(()=>null) : Promise.resolve(null);
+const downloadsPromise = window.claude?.use ? window.claude.use('downloads').catch(()=>null) : Promise.resolve(null);
+let current = null;
+
+const drop=$('#drop'), input=$('#fileInput');
+drop.onclick = () => input.click();
+drop.onkeydown = e => { if (e.key==='Enter'||e.key===' '){ e.preventDefault(); input.click(); } };
+['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => run([...e.dataTransfer.files]));
+input.onchange = () => { const f=[...input.files]; input.value=''; run(f); };
+
+const IMG_EXT = /\.(jpe?g|jfif|pjpeg|png|webp|gif|bmp|heic|heif|avif|tiff?)$/i;
+
+async function run(list){
+  if (!list.length) return;
+  drop.classList.add('busy'); $('#result').hidden = true;
+  const t0 = performance.now();
+  try{
+    const pdf = list.find(f => f.type==='application/pdf' || /\.pdf$/i.test(f.name));
+    const imgs = list.filter(f => f.type.startsWith('image/') || IMG_EXT.test(f.name));
+    if (!pdf && !imgs.length) throw { userMessage: 'Choose a PDF or photos of the report.' };
+    let ship;
+    if (pdf){
+      setStatus('<span class="spinner"></span>Reading PDF…');
+      ship = await readPdf(pdf);
+    } else if (true) {
+      throw { userMessage: 'Photos can\'t be read accurately here. Please upload the PDF of the shipment report.' };
+    } else {
+      imgs.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
+      setStatus(`<span class="spinner"></span>Preparing ${imgs.length} photo${imgs.length>1?'s':''}…`);
+      const blobs = [];
+      for (const f of imgs){
+        try { blobs.push(await toJpeg(f)); }
+        catch(e){ throw { userMessage: f.name+' could not be opened in this browser. Save it as JPG or PNG and try again.' }; }
+      }
+      ship = await readImages(blobs);
+    }
+    if (!rows(ship).length) throw { userMessage: 'No delivery IDs found in this file.' };
+    current = ship;
+    render();
+    const secs = ((performance.now()-t0)/1000).toFixed(1);
+    if (ship.warning) setStatus(esc(ship.warning), true); else setStatus(`Done in ${secs}s`);
+    exportExcel();
+  }catch(e){
+    console.log('[sorter]', e);
+    setStatus(esc(e?.userMessage || 'Could not read this file. Check it is a Delivery Shipment Report and try again.'), true);
+  }finally{ drop.classList.remove('busy'); }
+}
+
+async function toJpeg(f){
+  let src;
+  try { src = await createImageBitmap(f, { imageOrientation:'from-image' }); }
+  catch(e){
+    src = await new Promise((res, rej) => { const im=new Image();
+      im.onload=()=>res(im); im.onerror=()=>rej(new Error('decode')); im.src=URL.createObjectURL(f); });
+  }
+  const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+  const k = Math.min(1, 1600 / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width=Math.round(w*k); c.height=Math.round(h*k);
+  const ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+  ctx.drawImage(src,0,0,c.width,c.height);
+  const blob = await new Promise(r => c.toBlob(r,'image/jpeg',0.9));
+  if (!blob) throw new Error('encode');
+  return blob;
+}
+
+async function readPdf(file){
+  const data = new Uint8Array(await file.arrayBuffer());
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const doc = await pdfjsLib.getDocument({ data, isEvalSupported:false }).promise;
+  let lines = [];
+  for (let p=1; p<=doc.numPages; p++){
+    const tc = await (await doc.getPage(p)).getTextContent();
+    lines = lines.concat(itemsToLines(tc.items));
+  }
+  const ship = parseShipment(lines);
+  if (rows(ship).length) return ship;
+  // scanned PDF: render pages to images and read them
+  setStatus('<span class="spinner"></span>Scanned PDF, reading pages…');
+  const blobs=[];
+  for (let p=1; p<=doc.numPages; p++){
+    const page = await doc.getPage(p);
+    const v1 = page.getViewport({scale:1});
+    const vp = page.getViewport({scale: Math.sqrt(1150000/(v1.width*v1.height))});
+    const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
+    const ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
+    await page.render({canvasContext:ctx, viewport:vp}).promise;
+    blobs.push(await new Promise(r=>c.toBlob(r,'image/jpeg',0.9)));
+  }
+  return readImages(blobs);
+}
+
+function prompt(n){
+  return `${n} photo(s) of a printed "Delivery Shipment Report", pages 1-${n} in order. Columns: Pharmacy | Area | Route | Warehouse | Delivery ID | No of Boxes.
+A pharmacy code (e.g. P148) is printed only on the first row of its group; rows under it belong to it, including rows continuing at the top of the next page.
+Each group ends with a "Total" row; its first number is how many delivery IDs the group has. The last page footer says "Total Deliveries".
+Ignore blue stamps, numbers inside stamps and handwriting.
+Copy every Delivery ID digit exactly as printed. Never guess or correct.
+Reply with only JSON, one entry per pharmacy with its Total-row count: {"shipmentId":"35016","totalDeliveries":55,"p":[["P148",["111756435","111757338","111757414"],3]]}`;
+}
+
+async function readImages(blobs){
+  const sample = await samplePromise;
+  if (!sample) throw { userMessage: 'Reading photos only works when this page is opened in Claude. Or upload the PDF.' };
+  setStatus(`<span class="spinner"></span>Reading ${blobs.length} page${blobs.length>1?'s':''}…`);
+  let ship = await askOnce(sample, blobs, {});
+  let bad = problems(ship);
+  if (bad.length){
+    // silent safety net: re-read carefully with the strongest model
+    setStatus(`<span class="spinner"></span>Double-checking…`);
+    const again = await askOnce(sample, blobs, { modelTier:'complex' });
+    const bad2 = problems(again);
+    if (bad2.length <= bad.length){ ship = again; bad = bad2; }
+  }
+  ship.warning = bad.length ? 'Check on the report: ' + bad.join(', ') : '';
+  return ship;
+}
+
+function problems(s){
+  const out = [];
+  for (const p of s.pharmacies){
+    if (!/^P?\d+$/.test(p.code)) out.push('pharmacy code '+(p.code||'missing'));
+    if (p.declared != null && p.declared !== p.deliveries.length) out.push(`${p.code} (${p.deliveries.length} IDs, Total row says ${p.declared})`);
+    for (const d of p.deliveries) if (d.id.length !== 9) out.push(`${p.code} ID ${d.id}`);
+  }
+  const n = rows(s).length;
+  if (s.totalDeliveries != null && s.totalDeliveries !== n) out.push(`total ${n} IDs, report says ${s.totalDeliveries}`);
+  const seen = new Set(); for (const [,id] of rows(s)){ if (seen.has(id)) out.push('duplicate '+id); seen.add(id); }
+  return out;
+}
+
+async function askOnce(sample, blobs, extra){
+  let r;
+  try { r = await sample.json(prompt(blobs.length), { images: blobs, ...extra }); }
+  catch(e){
+    const m = { not_granted:'Claude was not allowed to read the photos. Allow it when asked, then try again.',
+      rate_limited:'Too many requests just now. Wait a minute and try again.',
+      images_unavailable:'Photo reading is not available here. Upload the PDF instead.' };
+    throw { userMessage: m[e?.code] || 'Could not read the photos. Try clearer, straight-on photos.' };
+  }
+  const out = { shipmentId: String(r?.shipmentId ?? '').replace(/\D/g,''), totalDeliveries: Number.isFinite(+r?.totalDeliveries) && r?.totalDeliveries!=null ? +r.totalDeliveries : null, pharmacies: [] };
+  for (const [code, ids, declared] of (Array.isArray(r?.p) ? r.p : [])){
+    const clean = (Array.isArray(ids)?ids:[]).map(x => String(x).replace(/\D/g,'')).filter(Boolean);
+    const c = String(code||'').trim().toUpperCase();
+    const prev = out.pharmacies.find(p => p.code===c);
+    const dec = declared==null || declared==='' || isNaN(+declared) ? null : +declared;
+    if (prev){ prev.deliveries.push(...clean.map(id=>({id}))); if (dec!=null) prev.declared = (prev.declared||0) + dec; }
+    else out.pharmacies.push({ code:c, declared: dec, deliveries: clean.map(id=>({id})) });
+  }
+  return out;
+}
+
+function rows(s){ return s.pharmacies.flatMap(p => p.deliveries.map(d => [p.code, d.id])); }
+function fileName(s){ return (s.shipmentId || 'shipment') + '.xlsx'; }
+
+function render(){
+  const s=current, r=rows(s), el=$('#result');
+  let last='';
+  el.innerHTML = `<div class="res-head">
+      <div><div class="sid">${esc(s.shipmentId||'—')}</div><div class="meta">${s.pharmacies.length} pharmacies · ${r.length} delivery IDs</div></div>
+      <button class="btn" id="dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16"/></svg>Download ${esc(fileName(s))}</button>
+    </div>
+    <div class="tablewrap"><table><thead><tr><th>Pharmacy</th><th>Delivery ID</th></tr></thead><tbody>${
+      r.map(([p,id]) => { const first = p!==last; last=p; return `<tr class="${first?'first':''}"><td>${esc(p)}</td><td>${esc(id)}</td></tr>`; }).join('')
+    }</tbody></table></div>`;
+  el.hidden = false;
+  $('#dl').onclick = exportExcel;
+}
+
+async function exportExcel(){
+  const s=current; if(!s) return;
+  const aoa = [['Pharmacy','Delivery ID'], ...rows(s)];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  for (let r=1; r<aoa.length; r++) ws[XLSX.utils.encode_cell({r,c:1})] = { t:'s', v:aoa[r][1] };
+  ws['!cols'] = [{wch:12},{wch:16}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Shipment '+(s.shipmentId||''));
+  const buf = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  const url = URL.createObjectURL(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  const a = document.createElement('a'); a.href = url; a.download = fileName(s);
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+</script>
+
+</body>
+</html>
